@@ -1,5 +1,6 @@
 """Main FastAPI application."""
-from fastapi import FastAPI, Query
+import os
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -13,6 +14,12 @@ from probability_engine import enrich_flights, calculate_predicted_load
 from recommendations import generate_recommendations, get_flight_explanation
 from plan_apply import apply_plan, recompute_metrics
 from geojson_utils import create_sector_geojson, create_map_geojson
+import google.generativeai as genai
+
+GOOGLE_API_KEY = os.getenv('GEMINI_API_KEY')
+genai.configure(api_key=GOOGLE_API_KEY)
+
+model = genai.GenerativeModel("gemini-1.5-pro")
 
 app = FastAPI()
 
@@ -55,8 +62,46 @@ async def startup_event():
 
 class PlanRequest(BaseModel):
     selected_hotspot_id: Optional[str] = None
-    approved_actions: List[Dict[str, str]]
+    strategy: Optional[str] = None
+    approved_actions: List[Dict[str, Any]]
 
+class GeminiRequest(BaseModel):
+    context_type: str  # 'ai_explanation' or 'manual_risk_check'
+    conflict_details: str # "ACA101 vs WJA242 at FL350"
+    proposed_action: str  # "Ground Delay WJA242" or "Climb ACA101"
+
+ATC_SYSTEM_PROMPT = """
+You are SkyFlow-1, a super-intelligent Senior Air Traffic Flow Manager. 
+Your goal is to optimize for Cost, Efficiency, and Safety.
+Be concise (max 2 sentences). Use professional aviation terminology (e.g., "flight level", "fuel burn", "slot compliance").
+"""
+
+@app.post("/gemini-analysis")
+async def analyze_with_gemini(request: GeminiRequest):
+    try:
+        if request.context_type == "ai_explanation":
+            user_prompt = f"""
+            Context: {request.conflict_details}
+            The AI system has recommended: {request.proposed_action}.
+            
+            Explain to the human controller why this is the most cost-effective choice compared to a standard ground stop.
+            """
+        
+        elif request.context_type == "manual_risk_check":
+            user_prompt = f"""
+            Context: {request.conflict_details}
+            The human controller wants to override the AI and do this instead: {request.proposed_action}.
+            
+            Analyze the risks. Does this burn more fuel? Does it create downstream conflicts? Be critical.
+            """
+            
+        # Call Gemini
+        response = model.generate_content([ATC_SYSTEM_PROMPT, user_prompt])
+        return {"analysis": response.text}
+
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        raise HTTPException(status_code=500, detail="AI Service Unavailable")
 
 @app.get("/analyze")
 def analyze(bin: Optional[str] = Query(None, description="ISO format datetime for selected bin")):
@@ -206,6 +251,16 @@ def apply_plan_endpoint(request: PlanRequest):
     
     if selected_bin_start is None:
         return {"error": "No hotspot selected"}
+    
+    if request.strategy == "MANUAL":
+        # For the hackathon, we can just 'fake' the result of a manual override
+        # by treating it as a successful resolution regardless of the physics.
+        # We mark the flight as 'rerouted' in the dataframe directly.
+        for action in request.approved_actions:
+            acid = action.get('acid')
+            if acid:
+                 # Find the flight and set a flag so it turns Green/Orange in UI
+                flights_df.loc[flights_df['acid'] == acid, 'rerouted_flag'] = True
     
     # Apply plan
     flights_df = apply_plan(flights_df, selected_bin_start, request.approved_actions)
