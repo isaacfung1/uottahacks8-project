@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './App.css'
+import ResolutionCenter from './components/ResolutionCenter'
 
 // Fix for default marker icons
 import icon from 'leaflet/dist/images/marker-icon.png'
@@ -281,6 +282,10 @@ function App() {
   const [error, setError] = useState(null)
   const [selectedBin, setSelectedBin] = useState(null)
 
+  const handleHotspotSelect = (binStart) => {
+    setSelectedBin(binStart === selectedBin ? null : binStart)
+  }
+
   useEffect(() => {
     loadAnalysisData()
   }, [selectedBin])
@@ -306,37 +311,84 @@ function App() {
     }
   }
 
-  const handleHotspotSelect = (binStart) => {
-    setSelectedBin(binStart)
-  }
+ // Unified Handler for the 3-Tier Resolution System
+  const handleResolutionStrategy = async (strategy, payload) => {
+    console.log(`Executing Strategy: ${strategy}`, payload);
 
-  const handleApprovePlan = async () => {
-    if (!analysisData || !analysisData.recommended_actions || analysisData.recommended_actions.length === 0) {
-      return
+    // 1. Validation: Ensure we know which hotspot we are solving
+    const hotspotId = selectedBin || analysisData.selected_hotspot?.bin_start;
+    if (!hotspotId) {
+        console.error("No hotspot selected");
+        return;
     }
 
-    try {
-      const response = await fetch(`${API_BASE}/plan`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          selected_hotspot_id: selectedBin || analysisData.selected_hotspot?.bin_start,
-          approved_actions: analysisData.recommended_actions.map(a => ({
-            acid: a.acid,
-            action_type: a.action_type
-          }))
-        })
-      })
+    // 2. Construct the Base Request Body
+    // We send 'strategy' so the backend knows if this was an AI or Human decision
+    let requestBody = {
+        selected_hotspot_id: hotspotId,
+        strategy: strategy, 
+        approved_actions: [] 
+    };
 
-      if (!response.ok) throw new Error('Failed to apply plan')
-      
-      const data = await response.json()
-      setAnalysisData(data)
+    // --- CASE 1: ACCEPT AI RECOMMENDATION ---
+    if (strategy === 'AI_PLAN' && payload) {
+        // payload = the specific recommendation object (e.g., { acid: "WJA242", action_type: "Ground Delay" ... })
+        requestBody.approved_actions.push({
+            acid: payload.acid,
+            action_type: payload.action_type,
+            parameters: payload.parameters || {} // Pass through any specific details like minutes delayed
+        });
+    }
+
+    // --- CASE 2: MANUAL CONTROLLER OVERRIDE ---
+    else if (strategy === 'MANUAL') {
+        // payload = { flight: "ACA101", action: "Altitude", value: "FL390" } from the manual form
+        
+        // Simple Validation
+        if (!payload.flight || !payload.action) {
+            alert("Please select a flight and an action type.");
+            return;
+        }
+
+        requestBody.approved_actions.push({
+            acid: payload.flight,
+            action_type: "MANUAL_OVERRIDE", 
+            // We combine the action + value into a readable string for the backend
+            details: `${payload.action} changed to ${payload.value || 'Standard'}`
+        });
+    }
+
+    // --- CASE 3: LEGACY PROTOCOL (SLEDGEHAMMER) ---
+    else if (strategy === 'LEGACY') {
+        // No specific flight payload needed, this applies to the whole sector
+        requestBody.approved_actions.push({
+            acid: "ALL_FLIGHTS",
+            action_type: "LEGACY_RESTRICTION",
+            details: "Miles-in-Trail: 20NM"
+        });
+    }
+
+    // 3. Send to Backend
+    try {
+        const response = await fetch(`${API_BASE}/plan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) throw new Error('Failed to apply plan');
+        
+        const data = await response.json();
+        
+        // Update the dashboard with the new simulation results
+        setAnalysisData(data); 
+        
+        // Optional: Show success toast
+        // alert(`Plan Executed: ${strategy}`); 
+
     } catch (err) {
-      setError(err.message)
-      console.error('Error applying plan:', err)
+        setError(err.message);
+        console.error('Error applying plan:', err);
     }
   }
 
@@ -412,29 +464,12 @@ function App() {
             </div>
           </div>
 
-          {/* Recommended Actions */}
-          {recommended_actions && recommended_actions.length > 0 && (
-            <div className="recommendations-section">
-              <h2>Recommended Actions</h2>
-              <div className="recommendations-list">
-                {recommended_actions.map((action, idx) => (
-                  <div key={idx} className="recommendation-item">
-                    <div className="recommendation-acid">{action.acid}</div>
-                    <div className="recommendation-action">{action.action_type}</div>
-                    <div className="recommendation-score">Score: {action.score.toFixed(2)}</div>
-                    <ul className="recommendation-explanations">
-                      {action.explanations.map((exp, i) => (
-                        <li key={i}>{exp}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-              <button className="approve-button" onClick={handleApprovePlan}>
-                Approve Plan
-              </button>
-            </div>
-          )}
+        {/* New Decision Support Interface */}
+        <ResolutionCenter 
+        contextData={selectedBin} 
+        recommendations={recommended_actions} 
+        onResolve={(strategy, data) => {handleResolutionStrategy(strategy, data)}} 
+        />
         </aside>
 
         {/* Main Content Area */}
