@@ -1,42 +1,130 @@
-#root {
-  max-width: 1280px;
+.app-container {
+  max-width: 1400px;
   margin: 0 auto;
   padding: 2rem;
-  text-align: center;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
+.app-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.app-header button {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background-color: #646cff;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.25s;
+}
+
+.app-header button:hover:not(:disabled) {
+  background-color: #535bf2;
+}
+
+.app-header button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-banner {
+  background-color: #fee;
+  border: 1px solid #fcc;
+  color: #c33;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.metrics-panel, .map-panel {
+  background-color: #1a1a1a;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.metrics-panel h2, .map-panel h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.metric-card {
+  background-color: #2a2a2a;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #3a3a3a;
+}
+
+.metric-label {
+  font-size: 0.875rem;
+  color: #999;
+  margin-bottom: 0.5rem;
+}
+
+.metric-value {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #646cff;
+}
+
+.loading-text {
+  color: #999;
+  font-style: italic;
+}
+
+.map-container {
+  height: 600px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #3a3a3a;
+}
+
+@media (max-width: 1024px) {
+  .content-grid {
+    grid-template-columns: 1fr;
   }
-  to {
-    transform: rotate(360deg);
+  
+  .map-container {
+    height: 500px;
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
+@media (prefers-color-scheme: light) {
+  .metrics-panel, .map-panel {
+    background-color: #f5f5f5;
+  }
+  
+  .metric-card {
+    background-color: #ffffff;
+    border: 1px solid #e0e0e0;
+  }
+  
+  .error-banner {
+    background-color: #fee;
+    border: 1px solid #fcc;
+    color: #c33;
   }
 }
 
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
-}
