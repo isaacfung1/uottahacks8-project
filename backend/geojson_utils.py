@@ -11,14 +11,14 @@ def route_to_linestring(route_points: List[tuple]) -> List[List[float]]:
 
 
 def create_sector_geojson() -> Dict[str, Any]:
-    """Create sector GeoJSON polygon (simplified as bounding box for MVP)."""
-    # Eastern Ontario sector bounds (simplified)
+    """Create sector GeoJSON polygon (Toronto–Ottawa bounding box for MVP)."""
+    # Toronto–Ottawa corridor bounds (approximate)
     sector_bounds = [
-        [-78.5, 44.0],  # SW
-        [-75.0, 44.0],  # SE
-        [-75.0, 46.5],  # NE
-        [-78.5, 46.5],  # NW
-        [-78.5, 44.0]   # Close polygon
+        [-80.5, 43.0],  # SW
+        [-73.5, 43.0],  # SE
+        [-73.5, 46.5],  # NE
+        [-80.5, 46.5],  # NW
+        [-80.5, 43.0]   # Close polygon
     ]
     
     return {
@@ -28,12 +28,100 @@ def create_sector_geojson() -> Dict[str, Any]:
             "coordinates": [sector_bounds]
         },
         "properties": {
-            "name": "Eastern Ontario Sector",
+            "name": "Toronto–Ottawa Sector",
             "fillColor": "#FF6B6B",
             "fillOpacity": 0.2,
             "strokeColor": "#FF6B6B",
             "strokeWidth": 2
         }
+    }
+
+
+def _collect_points_from_flights(flights: pd.DataFrame) -> List[List[float]]:
+    points = []
+    for _, flight in flights.iterrows():
+        route_points = flight.get('route_points', []) or []
+        for lat, lon in _sample_route_points(route_points, sample_count=3):
+            points.append([lon, lat])
+    return points
+
+
+def _centroid(points: List[List[float]]) -> List[float]:
+    if not points:
+        return []
+    lon_sum = sum(p[0] for p in points)
+    lat_sum = sum(p[1] for p in points)
+    count = len(points)
+    return [lon_sum / count, lat_sum / count]
+
+
+def _sample_route_points(route_points: List[tuple], sample_count: int = 3) -> List[tuple]:
+    """Sample a few representative points from a route."""
+    if not route_points:
+        return []
+    if len(route_points) <= sample_count:
+        return route_points
+
+    indices = [
+        0,
+        len(route_points) // 2,
+        len(route_points) - 1
+    ]
+    return [route_points[i] for i in indices]
+
+
+def create_hotspot_geojson(df: pd.DataFrame, hotspots: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Create GeoJSON FeatureCollection for hotspot points.
+    Each feature is a centroid of flights within a hotspot bin.
+    """
+    from datetime import timedelta
+    from hotspot_detection import BIN_SIZE_MINUTES
+
+    features = []
+
+    for hotspot in hotspots:
+        bin_start = hotspot.get('bin_start')
+        if bin_start is None:
+            continue
+        bin_end = bin_start + timedelta(minutes=BIN_SIZE_MINUTES)
+
+        flights_in_bin = df[
+            (df['dep_time_utc'] >= bin_start) &
+            (df['dep_time_utc'] < bin_end) &
+            (df['in_sector'] == True)
+        ]
+
+        points = _collect_points_from_flights(flights_in_bin)
+        hotspot_point = _centroid(points)
+        if not hotspot_point:
+            continue
+
+        severity = float(hotspot.get('severity', 0.0))
+        weighted_load = float(hotspot.get('weighted_load', 0.0))
+        legacy_count = int(hotspot.get('legacy_count', 0))
+
+        radius = 8 + min(24.0, max(0.0, weighted_load) * 4.0)
+
+        feature = {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                    "coordinates": hotspot_point
+            },
+            "properties": {
+                "bin_start": bin_start.isoformat(),
+                "legacy_count": legacy_count,
+                "weighted_load": weighted_load,
+                "severity": severity,
+                "radius": radius
+            }
+        }
+        features.append(feature)
+
+    return {
+        "type": "FeatureCollection",
+        "features": features
     }
 
 
@@ -47,6 +135,9 @@ def create_map_geojson(df: pd.DataFrame, selected_bin_start: pd.Timestamp = None
     from hotspot_detection import BIN_SIZE_MINUTES
     
     features = []
+
+    # Limit to Toronto–Ottawa sector flights
+    df = df[df['in_sector'] == True]
     
     for _, flight in df.iterrows():
         route_coords = route_to_linestring(flight['route_points'])

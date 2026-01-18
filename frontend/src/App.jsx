@@ -161,6 +161,28 @@ function FitBounds({ geojson }) {
   return null
 }
 
+// Zoom to selected hotspot
+function HotspotZoom({ selectedBin, hotspotGeojson }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!selectedBin || !hotspotGeojson?.features?.length) {
+      return
+    }
+
+    const match = hotspotGeojson.features.find(
+      (feature) => feature?.properties?.bin_start === selectedBin
+    )
+
+    if (match?.geometry?.type === 'Point') {
+      const [lng, lat] = match.geometry.coordinates
+      map.flyTo([lat, lng], 9, { duration: 0.8 })
+    }
+  }, [selectedBin, hotspotGeojson, map])
+
+  return null
+}
+
 // Styled GeoJSON component for flights
 function FlightGeoJSON({ data }) {
   const pointToLayer = (feature, latlng) => {
@@ -173,6 +195,9 @@ function FlightGeoJSON({ data }) {
     let weight = 1.5
     let opacity = 1.0
     let dashArray = null
+
+    const arrivalProb = Math.max(0.1, Math.min(1, props.arrival_probability ?? 0.85))
+    opacity = arrivalProb
     
     if (props.rerouted_flag) {
       color = '#FFA500'
@@ -184,7 +209,6 @@ function FlightGeoJSON({ data }) {
     } else if (props.ghost_flag) {
       color = '#CCCCCC'
       weight = 1
-      opacity = 0.4
     }
     
     return {
@@ -210,6 +234,45 @@ function SectorOverlay({ data }) {
   }
   
   return data ? <GeoJSON data={data} style={style} /> : null
+}
+
+// Hotspot overlay component
+function HotspotGeoJSON({ data }) {
+  const pointToLayer = (feature, latlng) => {
+    const baseRadius = feature?.properties?.radius ?? 8
+    const radius = baseRadius + 3
+    const severityRaw = feature?.properties?.severity
+    const severity = Number.isFinite(Number(severityRaw)) ? Number(severityRaw) : 0
+    let color = '#28a745'
+    if (severity >= 85) {
+      color = '#FF0000'
+    } else if (severity >= 60) {
+      color = '#FFC107'
+    }
+    return L.circleMarker(latlng, {
+      radius,
+      color,
+      weight: 2,
+      fillColor: color,
+      fillOpacity: 0.35
+    })
+  }
+  const onEachFeature = (feature, layer) => {
+    const props = feature?.properties || {}
+    const content = `
+      <div>
+        <strong>Hotspot</strong><br />
+        Center: center of activity for this time window<br />
+        Time: ${props.bin_start ? new Date(props.bin_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}<br />
+        Count: ${props.legacy_count ?? 'N/A'}<br />
+        Weighted Load: ${props.weighted_load?.toFixed ? props.weighted_load.toFixed(2) : 'N/A'}<br />
+        Severity: ${props.severity?.toFixed ? props.severity.toFixed(0) : 'N/A'}%
+      </div>
+    `
+    layer.bindTooltip(content, { sticky: true })
+  }
+
+  return data ? <GeoJSON data={data} pointToLayer={pointToLayer} onEachFeature={onEachFeature} /> : null
 }
 
 function App() {
@@ -341,7 +404,7 @@ function App() {
     return <div className="error">No data available</div>
   }
 
-  const { map_geojson, sector_geojson, hotspots, metrics, recommended_actions, flights_in_hotspot } = analysisData
+  const { map_geojson, sector_geojson, hotspot_geojson, hotspots, metrics, recommended_actions, flights_in_hotspot } = analysisData
 
   return (
     <div className="app">
@@ -394,7 +457,7 @@ function App() {
                   </div>
                   <div className="hotspot-metrics">
                     <span className="count">{hotspot.legacy_count}</span>
-                    <span className="severity">Severity: {hotspot.severity.toFixed(1)}</span>
+                    <span className="severity">Severity: {hotspot.severity.toFixed(0)}%</span>
                   </div>
                 </div>
               ))}
@@ -423,8 +486,10 @@ function App() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
               <FitBounds geojson={map_geojson} />
+              <HotspotZoom selectedBin={selectedBin} hotspotGeojson={hotspot_geojson} />
               <SectorOverlay data={sector_geojson} />
               <FlightGeoJSON data={map_geojson} />
+              <HotspotGeoJSON data={hotspot_geojson} />
             </MapContainer>
           </div>
 

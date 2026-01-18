@@ -13,7 +13,7 @@ from hotspot_detection import detect_hotspots, get_flights_in_bin, CAPACITY_PER_
 from probability_engine import enrich_flights, calculate_predicted_load
 from recommendations import generate_recommendations, get_flight_explanation
 from plan_apply import apply_plan, recompute_metrics
-from geojson_utils import create_sector_geojson, create_map_geojson
+from geojson_utils import create_sector_geojson, create_map_geojson, create_hotspot_geojson
 import google.generativeai as genai
 
 GOOGLE_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -196,6 +196,7 @@ def analyze(bin: Optional[str] = Query(None, description="ISO format datetime fo
     # Generate GeoJSON
     sector_geojson = create_sector_geojson()
     map_geojson = create_map_geojson(flights_df, selected_bin_start)
+    hotspot_geojson = create_hotspot_geojson(flights_df, hotspots[:10])
     
     # Format hotspots for JSON (convert timestamps)
     hotspots_formatted = []
@@ -205,19 +206,22 @@ def analyze(bin: Optional[str] = Query(None, description="ISO format datetime fo
             'bin_end': h['bin_end'].isoformat(),
             'legacy_count': int(h['legacy_count']),
             'capacity': float(h['capacity']),
-            'severity': float(h['severity'])
+            'severity': float(h['severity']),
+            'weighted_load': float(h.get('weighted_load', 0.0))
         })
     
     return {
         'sector_geojson': sector_geojson,
         'map_geojson': map_geojson,
+        'hotspot_geojson': hotspot_geojson,
         'hotspots': hotspots_formatted,
         'selected_hotspot': {
             'bin_start': selected_hotspot['bin_start'].isoformat(),
             'bin_end': selected_hotspot['bin_end'].isoformat(),
             'legacy_count': int(selected_hotspot['legacy_count']),
             'capacity': float(selected_hotspot['capacity']),
-            'severity': float(selected_hotspot['severity'])
+            'severity': float(selected_hotspot['severity']),
+            'weighted_load': float(selected_hotspot.get('weighted_load', 0.0))
         } if selected_hotspot else None,
         'metrics': metrics,
         'recommended_actions': recommended_actions,
@@ -319,6 +323,7 @@ def apply_plan_endpoint(request: PlanRequest):
     # Generate GeoJSON
     sector_geojson = create_sector_geojson()
     map_geojson = create_map_geojson(flights_df, selected_bin_start)
+    hotspot_geojson = create_hotspot_geojson(flights_df, hotspots[:10])
     
     # Format hotspots
     hotspots_formatted = []
@@ -328,19 +333,22 @@ def apply_plan_endpoint(request: PlanRequest):
             'bin_end': h['bin_end'].isoformat(),
             'legacy_count': int(h['legacy_count']),
             'capacity': float(h['capacity']),
-            'severity': float(h['severity'])
+            'severity': float(h['severity']),
+            'weighted_load': float(h.get('weighted_load', 0.0))
         })
     
     return {
         'sector_geojson': sector_geojson,
         'map_geojson': map_geojson,
+        'hotspot_geojson': hotspot_geojson,
         'hotspots': hotspots_formatted,
         'selected_hotspot': {
             'bin_start': selected_hotspot['bin_start'].isoformat(),
             'bin_end': selected_hotspot['bin_end'].isoformat(),
             'legacy_count': int(selected_hotspot['legacy_count']),
             'capacity': float(selected_hotspot['capacity']),
-            'severity': float(selected_hotspot['severity'])
+            'severity': float(selected_hotspot['severity']),
+            'weighted_load': float(selected_hotspot.get('weighted_load', 0.0))
         } if selected_hotspot else None,
         'metrics': metrics,
         'recommended_actions': recommended_actions,
