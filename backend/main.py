@@ -173,23 +173,25 @@ def analyze(bin: Optional[str] = Query(None, description="ISO format datetime fo
     # Calculate metrics
     legacy_count = 0
     predicted_load = 0.0
+    selected_capacity = CAPACITY_PER_BIN
     
     if selected_hotspot:
         legacy_count = selected_hotspot['legacy_count']
         predicted_load = calculate_predicted_load(flights_in_bin)
+        selected_capacity = float(selected_hotspot.get('capacity', CAPACITY_PER_BIN))
     
     metrics = {
         'legacy': {
             'count': legacy_count,
-            'capacity': float(CAPACITY_PER_BIN),
-            'status': 'RED' if legacy_count > CAPACITY_PER_BIN * 1.2 else 'YELLOW' if legacy_count > CAPACITY_PER_BIN else 'GREEN',
-            'recommendation': 'Ground Stop recommended (mock)' if legacy_count > CAPACITY_PER_BIN else 'Normal operations'
+            'capacity': float(selected_capacity),
+            'status': 'RED' if legacy_count > selected_capacity * 1.2 else 'YELLOW' if legacy_count > selected_capacity else 'GREEN',
+            'recommendation': 'Ground Stop recommended (mock)' if legacy_count > selected_capacity else 'Normal operations'
         },
         'skyflow': {
             'predicted_load': float(predicted_load),
-            'capacity': float(CAPACITY_PER_BIN),
-            'status': 'GREEN' if predicted_load <= CAPACITY_PER_BIN else 'YELLOW' if predicted_load <= CAPACITY_PER_BIN * 1.2 else 'RED',
-            'recommendation': 'Surgical plan recommended' if predicted_load > CAPACITY_PER_BIN else 'Normal operations'
+            'capacity': float(selected_capacity),
+            'status': 'GREEN' if predicted_load <= selected_capacity else 'YELLOW' if predicted_load <= selected_capacity * 1.2 else 'RED',
+            'recommendation': 'Surgical plan recommended' if predicted_load > selected_capacity else 'Normal operations'
         }
     }
     
