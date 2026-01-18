@@ -46,6 +46,44 @@ def _flight_contribution(row: pd.Series) -> float:
     )
 
 
+def _dynamic_capacity(flights_in_bin: pd.DataFrame) -> float:
+    """
+    Compute a dynamic capacity multiplier based on traffic complexity.
+
+    Higher variance/mix -> lower capacity.
+    """
+    base = CAPACITY_PER_BIN
+    if flights_in_bin.empty:
+        return base
+
+    speed_std = float(flights_in_bin['speed'].std() or 0.0)
+    altitude_std = float(flights_in_bin['altitude'].std() or 0.0)
+    type_mix = float(flights_in_bin['plane_type'].nunique() / max(len(flights_in_bin), 1))
+
+    ghost_ratio = float(flights_in_bin.get('ghost_flag', pd.Series([0] * len(flights_in_bin))).mean() or 0.0)
+    reroute_ratio = float(flights_in_bin.get('rerouted_flag', pd.Series([0] * len(flights_in_bin))).mean() or 0.0)
+
+    # Normalize to 0..1
+    speed_norm = min(speed_std / 150.0, 1.0)
+    altitude_norm = min(altitude_std / 5000.0, 1.0)
+    mix_norm = min(type_mix / 0.6, 1.0)
+    ghost_norm = min(ghost_ratio / 0.5, 1.0)
+    reroute_norm = min(reroute_ratio / 0.3, 1.0)
+
+    penalty = (
+        0.25 * speed_norm +
+        0.20 * altitude_norm +
+        0.20 * mix_norm +
+        0.20 * ghost_norm +
+        0.15 * reroute_norm
+    )
+
+    multiplier = 1.05 - penalty
+    multiplier = min(max(multiplier, 0.6), 1.1)
+
+    return base * multiplier
+
+
 def detect_hotspots(df: pd.DataFrame) -> List[Dict]:
     """
     Detect hotspots by counting flights per time bin in the sector.
@@ -72,10 +110,26 @@ def detect_hotspots(df: pd.DataFrame) -> List[Dict]:
     }).reset_index()
     bin_counts.columns = ['bin_start', 'legacy_count', 'weighted_load']
     
+    # Dynamic capacity per bin
+    capacity_by_bin = (
+        sector_flights.groupby('bin_start')
+        .apply(_dynamic_capacity)
+        .rename('capacity')
+        .reset_index()
+    )
+
+    bin_counts = bin_counts.merge(capacity_by_bin, on='bin_start', how='left')
+
+    # Sanitize capacity/weighted load
+    bin_counts['capacity'] = bin_counts['capacity'].fillna(CAPACITY_PER_BIN)
+    bin_counts['capacity'] = bin_counts['capacity'].replace([pd.NA, pd.NaT], CAPACITY_PER_BIN)
+    bin_counts['capacity'] = bin_counts['capacity'].astype(float)
+    bin_counts['weighted_load'] = bin_counts['weighted_load'].fillna(0.0).astype(float)
+
     # Calculate severity as percent of capacity (0-100)
-    bin_counts['capacity'] = CAPACITY_PER_BIN
     bin_counts['severity'] = (bin_counts['weighted_load'] / bin_counts['capacity']) * 100.0
-    bin_counts['severity'] = bin_counts['severity'].clip(lower=0, upper=100)
+    bin_counts['severity'] = bin_counts['severity'].replace([float('inf'), -float('inf')], 0.0)
+    bin_counts['severity'] = bin_counts['severity'].fillna(0.0).clip(lower=0, upper=100)
     bin_counts['bin_end'] = bin_counts['bin_start'] + timedelta(minutes=BIN_SIZE_MINUTES)
     
     # Sort by severity (highest first)
